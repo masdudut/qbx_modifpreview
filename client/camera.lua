@@ -1,25 +1,32 @@
--- client/camera.lua (FINAL)
-print('[qbx_modifpreview] client camera.lua loading...')
+print('[qbx_modifpreview] client camera.lua loaded (FINAL)')
 
 local Cam = {
   active = false,
+  orbit = false,
   cam = nil,
   veh = nil,
+  target = vec3(0,0,0),
 
-  -- orbit params (persist per session)
-  heading = nil,
-  pitch = nil,
-  dist = nil,
+  yaw = 0.0,
+  pitch = 0.0,
+  dist = 3.2,
 
-  orbitMode = false,
+  minPitch = -25.0,
+  maxPitch =  25.0,
+  minDist  =  2.0,
+  maxDist  =  6.0,
+
+  lastUpdate = 0,
 }
 
--- Persist last camera state (per preview session)
-local LastState = {
-  heading = 210.0,
-  pitch = -12.0,
-  dist = 4.2
-}
+local function deg2rad(d) return d * 0.017453292519943295 end
+
+local function getVehCenter(veh)
+  local c = GetEntityCoords(veh)
+  local minDim, maxDim = GetModelDimensions(GetEntityModel(veh))
+  local z = c.z + (maxDim.z * 0.55)
+  return vec3(c.x, c.y, z)
+end
 
 local function clamp(v, a, b)
   if v < a then return a end
@@ -27,162 +34,136 @@ local function clamp(v, a, b)
   return v
 end
 
-local function ensureCam()
-  if Cam.cam and DoesCamExist(Cam.cam) then return end
-  Cam.cam = CreateCam('DEFAULT_SCRIPTED_CAMERA', true)
-end
+local function raycastCam(target, desired)
+  local hit = 0
+  local endCoords = desired
+  local surfaceNormal = vec3(0,0,1)
 
-local function destroyCam()
-  if Cam.cam and DoesCamExist(Cam.cam) then
-    DestroyCam(Cam.cam, false)
+  local ray = StartShapeTestRay(
+    target.x, target.y, target.z,
+    desired.x, desired.y, desired.z,
+    -1, Cam.veh or 0, 7
+  )
+  local _, h, eC, nrm, _ent = GetShapeTestResult(ray)
+  hit = h
+  if hit == 1 then
+    endCoords = vec3(eC.x, eC.y, eC.z)
+    surfaceNormal = vec3(nrm.x, nrm.y, nrm.z)
+    -- dorong sedikit keluar biar nggak nempel
+    endCoords = endCoords + surfaceNormal * 0.25
   end
-  Cam.cam = nil
+  return endCoords
 end
 
-local function getVehTarget(veh)
-  local min, max = GetModelDimensions(GetEntityModel(veh))
-  local centerZ = (min.z + max.z) * 0.5
-  return GetOffsetFromEntityInWorldCoords(veh, 0.0, 0.0, centerZ + 0.35)
-end
-
-local function computeCamPos(veh, headingDeg, pitchDeg, dist)
-  local lookAt = getVehTarget(veh)
-
-  local h = math.rad(headingDeg)
-  local p = math.rad(pitchDeg)
-
-  local x = lookAt.x + math.cos(h) * dist * math.cos(p)
-  local y = lookAt.y + math.sin(h) * dist * math.cos(p)
-  local z = lookAt.z + math.sin(p) * dist + 0.45
-
-  return vector3(x, y, z), lookAt
-end
-
-local function preventGroundClip(pos, lookAt)
-  local found, gz = GetGroundZFor_3dCoord(pos.x, pos.y, pos.z + 50.0, 0)
-  if found then
-    local minAbove = 0.35
-    if pos.z < gz + minAbove then
-      pos = vector3(pos.x, pos.y, gz + minAbove)
+local function groundClamp(pos)
+  local ok, gz = GetGroundZFor_3dCoord(pos.x, pos.y, pos.z + 5.0, 0)
+  if ok then
+    local minZ = gz + 0.35
+    if pos.z < minZ then
+      return vec3(pos.x, pos.y, minZ)
     end
   end
-
-  -- jangan turun terlalu jauh dari target
-  if pos.z < lookAt.z - 0.85 then
-    pos = vector3(pos.x, pos.y, lookAt.z - 0.85)
-  end
-
   return pos
 end
 
-local function applyCamTick()
-  if not Cam.active or not Cam.veh or not DoesEntityExist(Cam.veh) then return end
-  ensureCam()
+local function computeCamPos()
+  local t = Cam.target
+  local yawR = deg2rad(Cam.yaw)
+  local pitchR = deg2rad(Cam.pitch)
 
-  Cam.pitch = clamp(Cam.pitch, -32.0, 10.0)
-  Cam.dist  = clamp(Cam.dist,  2.0,  8.5)
+  local x = t.x + (math.cos(yawR) * math.cos(pitchR)) * Cam.dist
+  local y = t.y + (math.sin(yawR) * math.cos(pitchR)) * Cam.dist
+  local z = t.z + (math.sin(pitchR)) * Cam.dist
 
-  local pos, lookAt = computeCamPos(Cam.veh, Cam.heading, Cam.pitch, Cam.dist)
-  pos = preventGroundClip(pos, lookAt)
+  local desired = vec3(x,y,z)
+  desired = raycastCam(t, desired)
+  desired = groundClamp(desired)
 
+  return desired
+end
+
+local function applyCam()
+  if not Cam.active or not DoesEntityExist(Cam.veh) then return end
+  Cam.target = getVehCenter(Cam.veh)
+
+  local pos = computeCamPos()
   SetCamCoord(Cam.cam, pos.x, pos.y, pos.z)
-  PointCamAtCoord(Cam.cam, lookAt.x, lookAt.y, lookAt.z)
-  SetCamFov(Cam.cam, 60.0)
-end
-
-local function setOrbitMode(on)
-  Cam.orbitMode = on == true
-
-  -- orbit ON: UI focus off, supaya mouse bisa drag orbit
-  TriggerEvent('qbx_modifpreview:nui:setFocus', not Cam.orbitMode)
-end
-
--- set start position yang jelas: kamera di belakang mobil (menghadap mobil)
-local function initDefaultFromVehicle(veh)
-  -- kalau ada last state, pakai itu
-  Cam.heading = LastState.heading
-  Cam.pitch   = LastState.pitch
-  Cam.dist    = LastState.dist
-
-  -- kalau belum pernah, set relatif ke heading mobil biar natural
-  if not Cam.heading then
-    local vehHeading = GetEntityHeading(veh)
-    Cam.heading = vehHeading + 180.0
-    Cam.pitch = -12.0
-    Cam.dist = 4.2
-  end
+  PointCamAtCoord(Cam.cam, Cam.target.x, Cam.target.y, Cam.target.z)
 end
 
 function Camera_StartMenu(veh)
-  if not veh or veh == 0 or not DoesEntityExist(veh) then return end
+  if not veh or not DoesEntityExist(veh) then return end
 
-  Cam.active = true
   Cam.veh = veh
+  Cam.target = getVehCenter(veh)
 
-  ensureCam()
+  -- start yaw dari heading kendaraan biar “jelas arah”
+  Cam.yaw = GetEntityHeading(veh) + 180.0
+  Cam.pitch = 8.0
+  Cam.dist = 3.2
 
-  initDefaultFromVehicle(veh)
-  applyCamTick()
+  if Cam.cam and DoesCamExist(Cam.cam) then
+    DestroyCam(Cam.cam, false)
+  end
 
-  SetCamActive(Cam.cam, true)
-  RenderScriptCams(true, true, 200, true, true)
+  Cam.cam = CreateCam("DEFAULT_SCRIPTED_CAMERA", true)
+  Cam.active = true
+  Cam.orbit = false
 
-  -- default: lock (orbit off)
-  setOrbitMode(false)
+  applyCam()
+  RenderScriptCams(true, true, 250, true, true)
 
-  CreateThread(function()
-    while Cam.active do
-      if not Cam.veh or not DoesEntityExist(Cam.veh) then break end
-
-      applyCamTick()
-
-      if Cam.orbitMode then
-        DisableAllControlActions(0)
-
-        local dx = GetDisabledControlNormal(0, 1)
-        local dy = GetDisabledControlNormal(0, 2)
-
-        Cam.heading = Cam.heading + (dx * -220.0)
-        Cam.pitch   = Cam.pitch   + (dy * -120.0)
-
-        if IsDisabledControlPressed(0, 241) then Cam.dist = Cam.dist - 0.08 end
-        if IsDisabledControlPressed(0, 242) then Cam.dist = Cam.dist + 0.08 end
-
-        -- backspace keluar orbit
-        if IsDisabledControlJustPressed(0, 177) then
-          setOrbitMode(false)
-        end
-      end
-
-      Wait(0)
-    end
-
-    setOrbitMode(false)
-  end)
+  -- saat menu kebuka, camera lock (tidak orbit sampai klik tombol)
+  -- fokus NUI tetap dipegang oleh nui.lua
 end
 
 function Camera_Stop()
-  if Cam.heading then LastState.heading = Cam.heading end
-  if Cam.pitch then   LastState.pitch   = Cam.pitch end
-  if Cam.dist then    LastState.dist    = Cam.dist end
-
+  Cam.orbit = false
   Cam.active = false
-  Cam.orbitMode = false
+
+  if Cam.cam and DoesCamExist(Cam.cam) then
+    RenderScriptCams(false, true, 250, true, true)
+    DestroyCam(Cam.cam, false)
+  end
+
+  Cam.cam = nil
   Cam.veh = nil
-
-  RenderScriptCams(false, true, 200, true, true)
-  destroyCam()
-
-  TriggerEvent('qbx_modifpreview:nui:setFocus', false)
 end
 
 function Camera_ToggleOrbit()
   if not Cam.active then return end
-  setOrbitMode(not Cam.orbitMode)
+  Cam.orbit = not Cam.orbit
 end
 
-RegisterNetEvent('qbx_modifpreview:client:camera', function()
-  Camera_ToggleOrbit()
-end)
+-- orbit loop
+CreateThread(function()
+  while true do
+    if not Cam.active or not Cam.orbit then
+      Wait(150)
+    else
+      Wait(0)
 
-print('[qbx_modifpreview] client camera.lua loaded OK')
+      DisableControlAction(0, 1, true)   -- look left/right
+      DisableControlAction(0, 2, true)   -- look up/down
+      DisableControlAction(0, 24, true)  -- attack
+      DisableControlAction(0, 25, true)  -- aim
+      DisableControlAction(0, 106, true) -- vehicle mouse control
+
+      local dx = GetDisabledControlNormal(0, 1)
+      local dy = GetDisabledControlNormal(0, 2)
+
+      -- sens
+      Cam.yaw = Cam.yaw + (dx * 140.0)
+      Cam.pitch = clamp(Cam.pitch + (-dy * 90.0), Cam.minPitch, Cam.maxPitch)
+
+      -- zoom
+      if IsDisabledControlPressed(0, 16) then -- mouse wheel up
+        Cam.dist = clamp(Cam.dist - 0.08, Cam.minDist, Cam.maxDist)
+      elseif IsDisabledControlPressed(0, 17) then -- mouse wheel down
+        Cam.dist = clamp(Cam.dist + 0.08, Cam.minDist, Cam.maxDist)
+      end
+
+      applyCam()
+    end
+  end
+end)

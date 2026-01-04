@@ -35,14 +35,11 @@ const h2Btn = document.getElementById('h2Btn');
 const h2Text = document.getElementById('h2Text');
 const h2Menu = document.getElementById('h2Menu');
 
-const btnCam = document.getElementById('btnCam');
+const h2Row = document.getElementById('h2Row'); // MUST exist in index.html
+
 const btnConfirm = document.getElementById('btnConfirm');
 const btnClose = document.getElementById('btnClose');
-
-// header rows: 2 baris di index kamu pakai class headerRow
-const headerRows = headersEl ? headersEl.querySelectorAll('.headerRow') : [];
-const h1Row = headerRows?.[0] || null;
-const h2Row = headerRows?.[1] || null;
+const btnCam = document.getElementById('btnCam');
 
 let state = {
   tabs: [],
@@ -92,8 +89,10 @@ function enableTabDragScroll() {
   });
 
   tabsEl.addEventListener('wheel', (e) => {
-    tabsEl.scrollLeft += e.deltaY;
-    e.preventDefault();
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      tabsEl.scrollLeft += e.deltaY;
+      e.preventDefault();
+    }
   }, { passive: false });
 }
 
@@ -105,6 +104,7 @@ function renderTabs() {
     b.textContent = t.label;
     b.onclick = async () => {
       state.currentTab = t.id;
+      closeMenus();
       await refreshDynamicOptions();
       render();
     };
@@ -112,12 +112,27 @@ function renderTabs() {
   });
 }
 
+function showHeaders(showHeader, showH2) {
+  if (!headersEl) return;
+
+  if (!showHeader) {
+    hide(headersEl);
+    return;
+  }
+  show(headersEl);
+
+  // FORCE H2 hide/show (ini yang bikin wheels/body gak muncul H2)
+  if (showH2) show(h2Row);
+  else hide(h2Row);
+}
+
 async function refreshDynamicOptions() {
   const tab = state.currentTab;
 
   if (tab === 'paints') {
+    const cat = state.selected.paints?.category || 'primary';
     const type = state.selected.paints?.type || 'Classic';
-    const list = await requestNui('requestPaintOptions', { type });
+    const list = await requestNui('requestPaintOptions', { category: cat, type });
     state.optionsByTab.paints = Array.isArray(list) ? list : [{ label:'Stock', value:'stock' }];
     return;
   }
@@ -141,27 +156,16 @@ function renderHeaders() {
   const h = state.headersByTab[tab];
 
   if (!h || h.show === false) {
-    hide(headersEl);
-    hide(h1Menu); hide(h2Menu);
+    showHeaders(false, false);
     return;
   }
 
-  show(headersEl);
-  show(h1Row);
-
-  // HARD RULE: H2 hanya boleh tampil di PAINTS
-  const showH2 = (tab === 'paints');
-
-  if (showH2) show(h2Row);
-  else {
-    hide(h2Row);
-    hide(h2Menu);
-  }
+  const showH2 = !!h.showH2;
+  showHeaders(true, showH2);
 
   h1Label.textContent = h.h1Label || 'Category';
   h2Label.textContent = h.h2Label || 'Type';
 
-  // current values
   let h1Current = null;
   let h2Current = null;
 
@@ -174,9 +178,9 @@ function renderHeaders() {
     h1Current = state.selected.body?.part || 'spoiler';
   }
 
-  // H1 dropdown (selalu)
   setDropdown(h1Text, h1Menu, h.h1Items || [], h1Current, async (val) => {
     if (tab === 'paints') {
+      state.selected.paints = state.selected.paints || {};
       state.selected.paints.category = String(val);
       post('setHeader', { tab:'paints', which:'h1', value: String(val) });
       await refreshDynamicOptions();
@@ -185,30 +189,38 @@ function renderHeaders() {
     }
 
     if (tab === 'wheels') {
+      state.selected.wheels = state.selected.wheels || {};
       state.selected.wheels.type = Number(val);
       state.selected.wheels.index = -1;
+
       post('setHeader', { tab:'wheels', which:'h1', value: Number(val) });
+
       await refreshDynamicOptions();
       render();
       return;
     }
 
     if (tab === 'body') {
+      state.selected.body = state.selected.body || {};
       state.selected.body.part = String(val);
       state.selected.body.index = -1;
+
       post('setHeader', { tab:'body', which:'h1', value: String(val) });
+
       await refreshDynamicOptions();
       render();
       return;
     }
   });
 
-  // H2 dropdown (PAINTS saja)
+  // H2 ONLY for paints
   if (showH2) {
     setDropdown(h2Text, h2Menu, h.h2Items || [], h2Current, async (val) => {
+      state.selected.paints = state.selected.paints || {};
       state.selected.paints.type = String(val);
       state.selected.paints.value = 'stock';
       post('setHeader', { tab:'paints', which:'h2', value: String(val) });
+
       await refreshDynamicOptions();
       render();
     });
@@ -234,6 +246,7 @@ function renderList() {
 
   opts.forEach(o => {
     const val = String(o.value);
+
     const row = document.createElement('div');
     row.className = 'item' + (val === current ? ' active' : '');
 
@@ -271,25 +284,10 @@ function render() {
 }
 
 // dropdown open/close
-h1Btn?.addEventListener('click', (e) => {
-  e.stopPropagation();
-  h1Menu.classList.toggle('hidden');
-  hide(h2Menu);
-});
-
-h2Btn?.addEventListener('click', (e) => {
-  if (state.currentTab !== 'paints') return;
-  e.stopPropagation();
-  h2Menu.classList.toggle('hidden');
-  hide(h1Menu);
-});
+h1Btn?.addEventListener('click', (e) => { e.stopPropagation(); h1Menu.classList.toggle('hidden'); hide(h2Menu); });
+h2Btn?.addEventListener('click', (e) => { e.stopPropagation(); h2Menu.classList.toggle('hidden'); hide(h1Menu); });
 
 window.addEventListener('click', () => closeMenus());
-
-// buttons
-btnCam?.addEventListener('click', () => post('camera'));
-btnConfirm?.addEventListener('click', () => post('confirm'));
-btnClose?.addEventListener('click', () => post('cancel'));
 
 window.addEventListener('message', async (e) => {
   const msg = e.data || {};
@@ -307,6 +305,7 @@ window.addEventListener('message', async (e) => {
     state.selected.wheels = state.selected.wheels || { type:0, index:-1 };
     state.selected.body = state.selected.body || { part:'spoiler', index:-1 };
 
+    closeMenus();
     await refreshDynamicOptions();
     render();
   }
@@ -319,6 +318,11 @@ window.addEventListener('message', async (e) => {
 
 document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape') post('cancel');
+  if (ev.key === 'Backspace') post('camera_back'); // optional (kalau kamu pakai)
 });
+
+btnConfirm?.addEventListener('click', () => post('confirm'));
+btnClose?.addEventListener('click', () => post('cancel'));
+btnCam?.addEventListener('click', () => post('camera'));
 
 enableTabDragScroll();

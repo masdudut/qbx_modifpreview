@@ -1,14 +1,12 @@
--- client/nui.lua (FINAL)
-print('[qbx_modifpreview] client nui.lua loaded (FINAL)')
+print('[qbx_modifpreview] client nui.lua loaded (FINAL camera-safe)')
 
 local nuiOpen = false
 
 local function setFocus(on)
   SetNuiFocus(on, on)
-  SetNuiFocusKeepInput(on and true or false)
+  SetNuiFocusKeepInput(on)
 end
 
--- ===== Helpers: GTA label resolve =====
 local function resolveGtaLabel(label)
   if not label or label == '' then return nil end
   local txt = GetLabelText(label)
@@ -52,6 +50,8 @@ end
 local function openNui()
   if nuiOpen then return end
   nuiOpen = true
+
+  -- NUI fokus ON (cursor muncul)
   setFocus(true)
 
   local sel = Preview_GetSelected() or {}
@@ -111,7 +111,7 @@ local function openNui()
 
     wheels = {
       show = true,
-      showH2 = false, -- OFF
+      showH2 = false, -- IMPORTANT: H2 OFF
       h1Label = 'Wheel Type',
       h1Items = (function()
         local arr = {}
@@ -124,7 +124,7 @@ local function openNui()
 
     body = {
       show = true,
-      showH2 = false, -- OFF
+      showH2 = false, -- IMPORTANT: H2 OFF
       h1Label = 'Body Part',
       h1Items = (function()
         local arr = {}
@@ -142,9 +142,9 @@ local function openNui()
   }
 
   local optionsByTab = {
-    paints = { {label='Stock', value='stock'} }, -- dynamic
+    paints = { {label='Stock', value='stock'} }, -- dynamic by requestPaintOptions
     wheels = buildWheelIndexList(),
-    body   = { {label='Stock', value=-1} },      -- dynamic
+    body   = { {label='Stock', value=-1} },      -- dynamic by requestBodyOptions
 
     xenon  = (function()
       local arr = {}
@@ -181,18 +181,22 @@ end
 local function closeNui()
   if not nuiOpen then return end
   nuiOpen = false
+
+  -- selalu reset focus supaya cursor tidak nyangkut
   setFocus(false)
+
   SendNUIMessage({ action='close' })
 end
 
 RegisterNetEvent('qbx_modifpreview:nui:open', openNui)
 RegisterNetEvent('qbx_modifpreview:nui:close', closeNui)
 
--- camera.lua uses this
-RegisterNetEvent('qbx_modifpreview:nui:setFocus', function(on)
-  setFocus(on == true)
+AddEventHandler('onClientResourceStop', function(res)
+  if res ~= GetCurrentResourceName() then return end
+  setFocus(false)
 end)
 
+-- ===== callbacks =====
 RegisterNUICallback('cancel', function(_, cb)
   TriggerEvent('qbx_modifpreview:client:cancel')
   cb(true)
@@ -203,9 +207,32 @@ RegisterNUICallback('confirm', function(_, cb)
   cb(true)
 end)
 
--- ✅ camera button
 RegisterNUICallback('camera', function(_, cb)
-  TriggerEvent('qbx_modifpreview:client:camera')
+  -- tombol camera: masuk/keluar orbit mode
+  if Camera_ToggleOrbit then
+    Camera_ToggleOrbit()
+  end
+
+  -- saat orbit ON => lepaskan cursor supaya mouse gerak kamera
+  -- saat orbit OFF => balikkan cursor ke menu
+  if Camera_IsOrbit and Camera_IsOrbit() then
+    setFocus(false)
+  else
+    setFocus(true)
+  end
+
+  cb(true)
+end)
+
+-- kalau kamu mau BACKSPACE balik dari orbit (optional)
+RegisterNUICallback('camera_back', function(_, cb)
+  if Camera_ToggleOrbit then
+    -- paksa off kalau sedang orbit
+    if Camera_IsOrbit and Camera_IsOrbit() then
+      Camera_ToggleOrbit()
+    end
+  end
+  setFocus(true)
   cb(true)
 end)
 
@@ -272,12 +299,4 @@ RegisterNUICallback('requestBodyOptions', function(data, cb)
     end
   end
   cb({{label='Stock', value=-1}})
-end)
-
-AddEventHandler('onClientResourceStart', function(res)
-  if res ~= GetCurrentResourceName() then return end
-  nuiOpen = false
-  SendNUIMessage({ action='close' })
-  SetNuiFocus(false, false)
-  SetNuiFocusKeepInput(false)
 end)
