@@ -1,4 +1,4 @@
-print('[qbx_modifpreview] client camera.lua loaded (FINAL)')
+print('[qbx_modifpreview] client camera.lua loaded (FINAL - orbit backspace fix)')
 
 local Cam = {
   active = false,
@@ -18,6 +18,20 @@ local Cam = {
 
   lastUpdate = 0,
 }
+
+-- =========================
+-- CONFIG (ubah jika perlu)
+-- =========================
+local PAD = 0
+
+-- Back / Cancel (umumnya BACKSPACE)
+local CONTROL_BACKSPACE = 177
+
+-- Nama event/action UI (kalau di script kamu beda, ubah di sini)
+local UI_EVENT_OPEN_MENU = 'qbx_modifpreview:client:openMenu'
+local UI_NUI_ACTION_OPEN_MENU = 'openMenu'
+
+-- =========================
 
 local function deg2rad(d) return d * 0.017453292519943295 end
 
@@ -91,6 +105,19 @@ local function applyCam()
   PointCamAtCoord(Cam.cam, Cam.target.x, Cam.target.y, Cam.target.z)
 end
 
+-- keluar orbit: kamera tetap aktif & posisi terakhir tetap nahan
+local function ExitOrbitToMenu()
+  if not Cam.active then return end
+
+  -- STOP orbit saja, JANGAN destroy cam, JANGAN RenderScriptCams(false)
+  Cam.orbit = false
+
+  -- Buka kembali menu UI (aman kalau tidak ada listener)
+  SetNuiFocus(true, true)
+  SendNUIMessage({ action = UI_NUI_ACTION_OPEN_MENU })
+  TriggerEvent(UI_EVENT_OPEN_MENU)
+end
+
 function Camera_StartMenu(veh)
   if not veh or not DoesEntityExist(veh) then return end
 
@@ -98,6 +125,9 @@ function Camera_StartMenu(veh)
   Cam.target = getVehCenter(veh)
 
   -- start yaw dari heading kendaraan biar “jelas arah”
+  -- NOTE: ini akan reset kalau StartMenu dipanggil lagi.
+  -- Agar kamera "nahan posisi terakhir" saat balik menu dari orbit,
+  -- pastikan flow UI kamu TIDAK memanggil Camera_StartMenu ulang ketika ExitOrbitToMenu().
   Cam.yaw = GetEntityHeading(veh) + 180.0
   Cam.pitch = 8.0
   Cam.dist = 3.2
@@ -133,6 +163,10 @@ end
 function Camera_ToggleOrbit()
   if not Cam.active then return end
   Cam.orbit = not Cam.orbit
+
+  -- kalau masuk orbit, biasanya UI ditutup & fokus dimatiin oleh nui.lua
+  -- tapi kalau ternyata tidak, kamu bisa pakai ini:
+  -- if Cam.orbit then SetNuiFocus(false, false) end
 end
 
 -- orbit loop
@@ -143,27 +177,39 @@ CreateThread(function()
     else
       Wait(0)
 
-      DisableControlAction(0, 1, true)   -- look left/right
-      DisableControlAction(0, 2, true)   -- look up/down
-      DisableControlAction(0, 24, true)  -- attack
-      DisableControlAction(0, 25, true)  -- aim
-      DisableControlAction(0, 106, true) -- vehicle mouse control
+      -- Disable control yang mengganggu orbit
+      DisableControlAction(PAD, 1, true)   -- look left/right
+      DisableControlAction(PAD, 2, true)   -- look up/down
+      DisableControlAction(PAD, 24, true)  -- attack
+      DisableControlAction(PAD, 25, true)  -- aim
+      DisableControlAction(PAD, 106, true) -- vehicle mouse control
 
-      local dx = GetDisabledControlNormal(0, 1)
-      local dy = GetDisabledControlNormal(0, 2)
+      -- PENTING: Backspace harus tetap kebaca meskipun beberapa control di-disable.
+      -- Kadang tombol jadi "disabled", jadi cek dua-duanya biar aman.
+      EnableControlAction(PAD, CONTROL_BACKSPACE, true)
+
+      if IsControlJustPressed(PAD, CONTROL_BACKSPACE) or IsDisabledControlJustPressed(PAD, CONTROL_BACKSPACE) then
+        ExitOrbitToMenu()
+        goto continue
+      end
+
+      local dx = GetDisabledControlNormal(PAD, 1)
+      local dy = GetDisabledControlNormal(PAD, 2)
 
       -- sens
       Cam.yaw = Cam.yaw + (dx * 140.0)
       Cam.pitch = clamp(Cam.pitch + (-dy * 90.0), Cam.minPitch, Cam.maxPitch)
 
       -- zoom
-      if IsDisabledControlPressed(0, 16) then -- mouse wheel up
+      if IsDisabledControlPressed(PAD, 16) then -- mouse wheel up
         Cam.dist = clamp(Cam.dist - 0.08, Cam.minDist, Cam.maxDist)
-      elseif IsDisabledControlPressed(0, 17) then -- mouse wheel down
+      elseif IsDisabledControlPressed(PAD, 17) then -- mouse wheel down
         Cam.dist = clamp(Cam.dist + 0.08, Cam.minDist, Cam.maxDist)
       end
 
       applyCam()
+
+      ::continue::
     end
   end
 end)
