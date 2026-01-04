@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="root" class="wrap hidden">
+    <div class="panel">
+
+      <div class="topbar">
+        <div class="title">
+          <div class="titleMain">MODIF PREVIEW</div>
+          <div class="titleSub" id="subtitle">Preview only • Confirm = create list</div>
+        </div>
+
+        <div class="actions">
+          <button id="btnCam" class="icon" title="Camera">📷</button>
+          <button id="btnConfirm" class="icon ok" title="Confirm">✔</button>
+          <button id="btnClose" class="icon" title="Close">✖</button>
+        </div>
+      </div>
+
+      <div class="tabsWrap">
+        <div class="tabs" id="tabs"></div>
+      </div>
+
+      <!-- HEADERS (dropdown) -->
+      <div id="headers" class="headers hidden">
+  <div class="headerRow" id="h1Row">
+    <div class="headerLabel" id="h1Label">Category</div>
+    <div class="dd" id="h1Dd">
+      <button class="ddBtn" id="h1Btn" type="button">
+        <span class="ddText" id="h1Text">Select</span>
+        <span class="ddArrow">▾</span>
+      </button>
+      <div class="ddMenu hidden" id="h1Menu"></div>
+    </div>
+  </div>
+
+  <div class="headerRow" id="h2Row">
+    <div class="headerLabel" id="h2Label">Type</div>
+    <div class="dd" id="h2Dd">
+      <button class="ddBtn" id="h2Btn" type="button">
+        <span class="ddText" id="h2Text">Select</span>
+        <span class="ddArrow">▾</span>
+      </button>
+      <div class="ddMenu hidden" id="h2Menu"></div>
+    </div>
+  </div>
+</div>
+
+
+      <div class="divider">
+        <span>OPTIONS</span>
+      </div>
+
+      <div class="section">
+        <div class="sectionTitle" id="sectionTitle">Select an option</div>
+        <div class="list" id="list"></div>
+      </div>
+
+      <div class="hint">
+        <span>ESC</span> close • <span>BACKSPACE</span> back from camera
+      </div>
+
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
