@@ -1,87 +1,78 @@
--- client/order_menu.lua (FINAL)
 print('[qbx_modifpreview] client order_menu.lua loading...')
 
-local currentSlot, currentMeta
-
-local function isInstalled(m) return m and m.installed == true end
-
-RegisterNetEvent('qbx_modifpreview:client:openOrderMenu', function(slot, meta)
-  currentSlot = tonumber(slot)
-  currentMeta = meta
-
-  local isMech = lib.callback.await('qbx_modifpreview:server:isMechanic', false)
-  if not isMech then
-    lib.notify({ type='error', title='Order', description='Hanya mechanic yang bisa install.' })
-    return
+local function fmtTime(ts)
+  -- Di client FiveM, library `os` bisa nil → jangan dipakai.
+  -- Kalau ts angka unix seconds/ms, tampilkan saja apa adanya.
+  if ts == nil then return '-' end
+  if type(ts) == 'number' then
+    -- coba deteksi ms vs seconds (kalau ms, kecilkan)
+    if ts > 2000000000 then
+      -- kemungkinan ms
+      ts = math.floor(ts / 1000)
+    end
+    return ('%d'):format(ts)
   end
+  return tostring(ts)
+end
 
-  if not Workshop_IsInside() then
-    lib.notify({ type='error', title='Order', description='Kamu harus berada di zona bengkel.' })
-    return
-  end
+local function buildContext(slot, meta)
+  local title = 'Modif List'
+  local plate = meta.plate or '-'
+  local shop = meta.workshopId or '-'
+  local created = fmtTime(meta.createdAt)
 
   local opts = {}
 
   opts[#opts+1] = {
-    title = ('Plate: %s'):format(meta.plate or '-'),
-    description = ('Workshop: %s'):format(meta.workshopId or '-'),
-    disabled = true
+    title = ('Plate: %s'):format(plate),
+    description = ('Workshop: %s • Created: %s'):format(shop, created),
+    disabled = true,
   }
 
-  opts[#opts+1] = { title = '—', disabled = true }
+  opts[#opts+1] = { title = '— Mods (klik untuk install) —', disabled = true }
 
   for i, m in ipairs(meta.mods or {}) do
-    local installed = isInstalled(m)
+    local installed = m.installed == true
+    local label = m.label or ('Mod #' .. i)
+
     opts[#opts+1] = {
-      title = installed and ('✅ %s'):format(m.label or ('Mod %d'):format(i)) or (m.label or ('Mod %d'):format(i)),
-      description = installed and 'Installed' or (m.description or 'Click to install'),
+      title = installed and ('~c~%s'):format(label) or label,
+      description = installed and 'Sudah terpasang' or 'Klik untuk install (butuh partkit)',
+      icon = installed and 'check' or 'wrench',
       disabled = installed,
       onSelect = function()
-        TriggerEvent('qbx_modifpreview:client:installOrderMod', currentSlot, i, m)
+        TriggerEvent('qbx_modifpreview:client:installOrderMod', slot, i, m)
       end
     }
   end
 
-  opts[#opts+1] = { title = '—', disabled = true }
+  opts[#opts+1] = { title = '— Actions —', disabled = true }
 
   opts[#opts+1] = {
-    title = '🗑 Delete Modif List',
-    description = 'Hapus item mod_list dari inventory',
+    title = 'Delete Modif List',
+    description = 'Hapus item mod_list_cosmetic ini.',
+    icon = 'trash',
     onSelect = function()
-      TriggerServerEvent('qbx_modifpreview:server:deleteOrder', currentSlot)
+      TriggerServerEvent('qbx_modifpreview:server:deleteOrder', slot)
     end
   }
 
-  lib.registerContext({
-    id = 'qbx_modifpreview_order_menu',
-    title = 'Modif List',
-    options = opts
-  })
+  return {
+    id = 'qbx_modifpreview_order',
+    title = title,
+    options = opts,
+  }
+end
 
-  lib.showContext('qbx_modifpreview_order_menu')
-end)
+RegisterNetEvent('qbx_modifpreview:client:openOrderMenu', function(slot, meta)
+  if type(meta) ~= 'table' then
+    lib.notify({ type='error', title='Order', description='Metadata tidak valid.' })
+    return
+  end
 
-RegisterNetEvent('qbx_modifpreview:client:orderMetaUpdated', function(slot, meta)
-  if tonumber(slot) ~= tonumber(currentSlot) then return end
-  currentMeta = meta
-  TriggerEvent('qbx_modifpreview:client:openOrderMenu', currentSlot, currentMeta)
+  local ctx = buildContext(slot, meta)
+  lib.registerContext(ctx)
+  lib.showContext(ctx.id)
 end)
 
 print('[qbx_modifpreview] client order_menu.lua loaded OK')
-
-RegisterNetEvent('qbx_modifpreview:client:useModifList', function(item)
-  -- item biasanya berisi: slot, metadata, name, count, dll
-  if not item or not item.slot then
-    lib.notify({ type = 'error', title = 'Order', description = 'Slot item tidak terbaca.' })
-    return
-  end
-
-  -- kalau metadata ada, langsung buka UI (lebih cepat, tanpa server)
-  if type(item.metadata) == 'table' and type(item.metadata.mods) == 'table' then
-    TriggerEvent('qbx_modifpreview:client:openOrderMenu', item.slot, item.metadata)
-    return
-  end
-
-  -- fallback: minta server ambil metadata slot yang benar
-  TriggerServerEvent('qbx_modifpreview:server:useModListSlot', item.slot)
-end)

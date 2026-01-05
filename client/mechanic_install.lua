@@ -1,6 +1,10 @@
 -- client/mechanic_install.lua (FINAL)
 print('[qbx_modifpreview] client mechanic_install.lua loading...')
 
+local SPRAY_PROP = `prop_cs_spray_can`
+local sprayObj = nil
+local spraySoundId = nil
+
 local function getClosestVehicle(maxDist)
   local ped = PlayerPedId()
   local p = GetEntityCoords(ped)
@@ -16,40 +20,85 @@ local function faceEntity(ped, ent)
   SetEntityHeading(ped, heading)
 end
 
-local function moveToWorkPos(veh, modType)
+local function getFrontWorkPos(veh)
+  -- posisi kerja di depan mobil (dipakai semua tipe biar konsisten & tidak tenggelam)
+  local pos = GetOffsetFromEntityInWorldCoords(veh, 0.0, 2.0, 0.0)
+  local heading = GetEntityHeading(veh) + 180.0
+
+  local _, gz = GetGroundZFor_3dCoord(pos.x, pos.y, pos.z + 1.0, 0)
+  if gz then pos = vec3(pos.x, pos.y, gz) end
+
+  return pos, heading
+end
+
+local function goToWorkPos(veh)
   local ped = PlayerPedId()
-  local off = vec3(-1.0, 0.8, 0.0) -- default side
+  local target, heading = getFrontWorkPos(veh)
 
-  if modType == 'paint' then
-    off = vec3(-1.1, 0.4, 0.0)
-  elseif modType == 'wheels' then
-    off = vec3(-1.0, 1.2, 0.0)
-  elseif modType == 'body_front' then
-    off = vec3(0.0, 2.2, 0.0)
-  elseif modType == 'body_rear' then
-    off = vec3(0.0, -2.4, 0.0)
-  elseif modType == 'body_roof' then
-    off = vec3(0.0, 0.2, 0.0)
-  end
-
-  local target = GetOffsetFromEntityInWorldCoords(veh, off.x, off.y, off.z)
-  TaskGoStraightToCoord(ped, target.x, target.y, target.z, 1.0, 6000, GetEntityHeading(veh), 0.5)
+  TaskGoStraightToCoord(ped, target.x, target.y, target.z, 1.0, 6000, heading, 0.2)
 
   local timeout = GetGameTimer() + 6000
   while GetGameTimer() < timeout do
     local pp = GetEntityCoords(ped)
-    if #(pp - target) < 0.8 then break end
+    if #(pp - target) < 0.7 then break end
     Wait(50)
   end
 
+  SetEntityCoordsNoOffset(ped, target.x, target.y, target.z, false, false, false)
+  SetEntityHeading(ped, heading)
   faceEntity(ped, veh)
 end
 
-local function playInstallProgress(labelText)
-  local dur = math.random(3000, 10000)
+local function ensureSprayProp()
+  if sprayObj and DoesEntityExist(sprayObj) then return end
+  RequestModel(SPRAY_PROP)
+  while not HasModelLoaded(SPRAY_PROP) do Wait(10) end
 
-  -- scenario mekanik aman dan umum
-  TaskStartScenarioInPlace(PlayerPedId(), 'WORLD_HUMAN_VEHICLE_MECHANIC', 0, true)
+  local ped = PlayerPedId()
+  sprayObj = CreateObject(SPRAY_PROP, 0.0, 0.0, 0.0, true, true, false)
+  local bone = GetPedBoneIndex(ped, 57005) -- RH
+  AttachEntityToEntity(sprayObj, ped, bone, 0.12, 0.02, -0.02, -80.0, 0.0, 0.0, true, true, false, true, 1, true)
+  SetModelAsNoLongerNeeded(SPRAY_PROP)
+end
+
+local function clearSprayProp()
+  if sprayObj and DoesEntityExist(sprayObj) then
+    DeleteEntity(sprayObj)
+  end
+  sprayObj = nil
+end
+
+local function startSpraySound()
+  -- built-in sound (kalau tidak ada di build kamu, tidak crash)
+  pcall(function()
+    spraySoundId = GetSoundId()
+    PlaySoundFromEntity(spraySoundId, 'SPRAY', PlayerPedId(), 'CARWASH_SOUNDS', true, 0)
+  end)
+end
+
+local function stopSpraySound()
+  pcall(function()
+    if spraySoundId then
+      StopSound(spraySoundId)
+      ReleaseSoundId(spraySoundId)
+    end
+  end)
+  spraySoundId = nil
+end
+
+local function playInstallProgress(labelText, modType)
+  local dur = math.random(3000, 10000)
+  local ped = PlayerPedId()
+
+  -- semua tipe pakai 1 anim mekanik depan mobil
+  TaskStartScenarioInPlace(ped, 'WORLD_HUMAN_VEHICLE_MECHANIC', 0, true)
+
+  -- paint/xenon pakai spray prop (visual)
+  local useSpray = (modType == 'paint' or modType == 'xenon')
+  if useSpray then
+    ensureSprayProp()
+    startSpraySound()
+  end
 
   local ok = lib.progressCircle({
     duration = dur,
@@ -60,7 +109,10 @@ local function playInstallProgress(labelText)
     disable = { move = true, car = true, combat = true }
   })
 
-  ClearPedTasks(PlayerPedId())
+  stopSpraySound()
+  clearSprayProp()
+  ClearPedTasks(ped)
+
   return ok
 end
 
@@ -149,13 +201,20 @@ RegisterNetEvent('qbx_modifpreview:client:installOrderMod', function(slot, modIn
     return
   end
 
-  if not Workshop_IsInside() then
+  if Workshop_IsInside and not Workshop_IsInside() then
     lib.notify({ type='error', title='Install', description='Kamu harus berada di zona bengkel.' })
     return
   end
 
-  local veh = nil
+  -- butuh partkit
+  local okKit = lib.callback.await('qbx_modifpreview:server:consumepartkit', false)
+  if not okKit then
+    lib.notify({ type='error', title='Install', description='Butuh partkit untuk install 1 part.' })
+    return
+  end
+
   local ped = PlayerPedId()
+  local veh = nil
 
   if IsPedInAnyVehicle(ped, false) then
     veh = GetVehiclePedIsIn(ped, false)
@@ -168,19 +227,9 @@ RegisterNetEvent('qbx_modifpreview:client:installOrderMod', function(slot, modIn
     return
   end
 
-  -- pilih posisi kerja berdasarkan jenis
-  local posType = mod.type
-  if mod.type == 'body' then
-    local mt = tonumber((mod.data or {}).modType or 0)
-    if mt == 1 or mt == 2 then posType = 'body_front'
-    elseif mt == 2 then posType = 'body_rear'
-    elseif mt == 10 then posType = 'body_roof'
-    end
-  end
+  goToWorkPos(veh)
 
-  moveToWorkPos(veh, posType)
-
-  local ok = playInstallProgress(mod.label or 'Installing...')
+  local ok = playInstallProgress(mod.label or 'Installing...', mod.type)
   if not ok then
     lib.notify({ type='error', title='Install', description='Dibatalkan.' })
     return
@@ -196,3 +245,23 @@ RegisterNetEvent('qbx_modifpreview:client:installOrderMod', function(slot, modIn
 end)
 
 print('[qbx_modifpreview] client mechanic_install.lua loaded OK')
+
+
+-- client/use_modlist.lua (atau tempel di client/order_menu.lua)
+RegisterNetEvent('qbx_modifpreview:client:useModifList', function(item)
+  print('[qbx_modifpreview] useModifList fired', item and item.slot)
+
+  if not item or not item.slot then
+    lib.notify({ type='error', title='Modif', description='Item slot tidak terbaca.' })
+    return
+  end
+
+  local meta, err = lib.callback.await('qbx_modifpreview:server:getOrderFromSlot', false, item.slot)
+  if not meta then
+    lib.notify({ type='error', title='Modif', description=err or 'Metadata tidak ditemukan.' })
+    return
+  end
+
+  -- buka menu list (punyamu sudah ada event ini)
+  TriggerEvent('qbx_modifpreview:client:openOrderMenu', item.slot, meta)
+end)

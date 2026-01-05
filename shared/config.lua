@@ -6,12 +6,15 @@ Config.ConfirmCommand = 'modifconfirm'
 Config.RequireDriver = true
 
 Config.OrderItemName = 'mod_list_cosmetic'
+Config.partkitItemName = 'partkit'
+
 
 -- Job mechanic yang boleh install (nanti dipakai untuk gating)
 Config.AllowedMechanicJobs = {
   mechanic = true,
   bennys = true,
 }
+
 
 Config.Workshops = {
   {

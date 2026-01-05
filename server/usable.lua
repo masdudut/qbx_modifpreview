@@ -1,53 +1,72 @@
--- server/usable.lua (FINAL)
-print('[qbx_modifpreview] server usable.lua loading...')
-
+-- server/usable.lua (FINAL - callback mode + debug print)
 local inv = exports.ox_inventory
 
-CreateThread(function()
-  local itemName = Config.OrderItemName or 'mod_list_cosmetic'
+local function getPlayer(src)
+  return exports.qbx_core:GetPlayer(src)
+end
 
-  if not inv or not inv.RegisterUsableItem then
-    print('[qbx_modifpreview] ERROR: ox_inventory export RegisterUsableItem not found')
-    return
+local function isMechanic(src)
+  local player = getPlayer(src)
+  if not player then return false end
+
+  local job = player.PlayerData and player.PlayerData.job
+  local jobName = job and job.name
+  if not jobName then return false end
+
+  if Config.AllowedMechanicJobs then
+    return Config.AllowedMechanicJobs[jobName] == true
   end
 
-  inv:RegisterUsableItem(itemName, function(source, item)
-    if not item or not item.slot then
-      TriggerClientEvent('ox_lib:notify', source, { type='error', title='Order', description='Slot item tidak terbaca.' })
-      return
-    end
+  return jobName == 'mechanic'
+end
 
-    local full = inv:GetSlot(source, item.slot)
-    if not full or full.name ~= itemName then
-      TriggerClientEvent('ox_lib:notify', source, { type='error', title='Order', description='Item tidak valid pada slot ini.' })
-      return
-    end
+local function dprint(...)
+  print(('[qbx_modifpreview][usable] %s'):format(table.concat({ ... }, ' ')))
+end
 
-    local meta = full.metadata
-    if type(meta) ~= 'table' or type(meta.mods) ~= 'table' then
-      TriggerClientEvent('ox_lib:notify', source, { type='error', title='Order', description='Metadata mod list tidak ditemukan.' })
-      return
-    end
-
-    TriggerClientEvent('qbx_modifpreview:client:openOrderMenu', source, item.slot, meta)
-  end)
-
-  print(('[qbx_modifpreview] usable registered for item: %s'):format(itemName))
-end)
-
-print('[qbx_modifpreview] server usable.lua loaded OK')
-
-RegisterNetEvent('qbx_modifpreview:server:useModListSlot', function(slot)
-  local src = source
+-- Client call: ambil metadata order dari slot item yang dipakai
+lib.callback.register('qbx_modifpreview:server:getOrderFromSlot', function(src, slot)
   slot = tonumber(slot)
-  if not slot then return end
+  if not slot then
+    dprint('getOrderFromSlot fail: slot invalid src=', src)
+    return nil, 'Slot tidak valid.'
+  end
 
   local itemName = Config.OrderItemName or 'mod_list_cosmetic'
-  local full = exports.ox_inventory:GetSlot(src, slot)
+  local item = inv:GetSlot(src, slot)
 
-  if not full or full.name ~= itemName then return end
-  local meta = full.metadata
-  if type(meta) ~= 'table' or type(meta.mods) ~= 'table' then return end
+  if not item then
+    dprint('getOrderFromSlot fail: GetSlot nil src=', src, 'slot=', slot)
+    return nil, 'Item tidak ditemukan pada slot itu.'
+  end
 
-  TriggerClientEvent('qbx_modifpreview:client:openOrderMenu', src, slot, meta)
+  if item.name ~= itemName then
+    dprint('getOrderFromSlot fail: wrong item name src=', src, 'slot=', slot, 'name=', tostring(item.name))
+    return nil, 'Item tidak valid pada slot itu.'
+  end
+
+  -- Optional restriction: hanya mechanic yg bisa buka
+  if Config.OnlyMechanicCanOpenList == true and not isMechanic(src) then
+    dprint('getOrderFromSlot blocked: not mechanic src=', src)
+    return nil, 'Hanya mechanic yang bisa membuka Modif List.'
+  end
+
+  local meta = item.metadata
+  if type(meta) ~= 'table' then
+    dprint('getOrderFromSlot fail: metadata not table src=', src, 'slot=', slot, 'metaType=', type(meta))
+    return nil, 'Metadata item kosong / tidak valid.'
+  end
+
+  if type(meta.mods) ~= 'table' then
+    dprint('getOrderFromSlot fail: meta.mods missing src=', src, 'slot=', slot, 'meta=', json.encode(meta))
+    return nil, 'Metadata mod list tidak ditemukan.'
+  end
+
+  -- DEBUG PRINT (ini yang kamu minta)
+  dprint('getOrderFromSlot OK src=', src, 'slot=', slot, 'plate=', tostring(meta.plate), 'mods=', tostring(#meta.mods))
+  dprint('META JSON:', json.encode(meta))
+
+  return meta, nil
 end)
+
+print('[qbx_modifpreview] server usable.lua loaded (callback mode + debug)')

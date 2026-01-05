@@ -1,28 +1,37 @@
-local inv = exports.ox_inventory
+-- server/inv.lua
+-- Wrapper kecil untuk kompatibilitas beberapa versi ox_inventory
 
-function Inv_AddOrderItem(src, itemName, metadata)
-  -- ox_inventory AddItem -> return boolean, reason?
-  return inv:AddItem(src, itemName, 1, metadata)
+local Ox = exports.ox_inventory
+
+function Inv_AddItem(src, name, count, metadata)
+  return Ox:AddItem(src, name, count or 1, metadata)
 end
 
 function Inv_GetSlot(src, slot)
-  return inv:GetSlot(src, slot)
+  return Ox:GetSlot(src, slot)
 end
 
-function Inv_RemoveItem(src, itemName, count, slot)
-  return inv:RemoveItem(src, itemName, count, nil, slot)
+function Inv_RemoveItem(src, name, count, metadata, slot)
+  return Ox:RemoveItem(src, name, count or 1, metadata, slot)
 end
 
-function Inv_SetMetadata(src, slot, meta)
-  -- beda versi ox_inventory: coba beberapa export
-  if inv.SetMetadata then
-    return inv:SetMetadata(src, slot, meta)
+function Inv_CountItem(src, name)
+  return Ox:GetItemCount(src, name)
+end
+
+-- Set metadata: coba beberapa export (beda versi)
+function Inv_SetSlotMetadata(src, slot, meta)
+  if Ox.SetMetadata then
+    local ok = Ox:SetMetadata(src, slot, meta)
+    if ok then return true end
   end
-  if inv.SetSlotMetadata then
-    return inv:SetSlotMetadata(src, slot, meta)
+  if Ox.SetSlotMetadata then
+    local ok = Ox:SetSlotMetadata(src, slot, meta)
+    if ok then return true end
   end
-  if inv.SetItemMetadata then
-    return inv:SetItemMetadata(src, slot, meta)
+  if Ox.SetItemMetadata then
+    local ok = Ox:SetItemMetadata(src, slot, meta)
+    if ok then return true end
   end
   return false
 end
