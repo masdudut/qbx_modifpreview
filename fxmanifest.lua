@@ -22,15 +22,28 @@ shared_scripts {
 
 client_scripts {
   'client/workshops.lua',
-  'client/camera.lua',     -- IMPORTANT: sebelum preview.lua
+
+  -- camera harus ada sebelum preview (preview manggil camera)
+  'client/camera.lua',
+
+  -- preview expose Preview_GetVehicle/Selected untuk nui.lua
   'client/preview.lua',
+
+  -- nui open/close + callbacks
   'client/nui.lua',
-  'client/command.lua',
+
+  -- UI modlist / menu mechanic (boleh setelah nui, tapi tidak wajib)
   'client/order_menu.lua',
+  'client/mechanic_install.lua',
+
+  -- command terakhir (dia trigger startPreview dll)
+  'client/command.lua',
 }
 
 server_scripts {
+  -- kalau inv/install/orders/main saling pakai, aman urut begini:
   'server/inv.lua',
+  'server/install.lua',
   'server/orders.lua',
   'server/usable.lua',
   'server/main.lua',

@@ -69,7 +69,7 @@ local function openNui()
   local selected = {
     paints = {
       category = (sel.paints and sel.paints.category) or 'primary',
-      type     = (sel.paints and sel.paints.type) or 'Classic',
+      type = (sel.paints and sel.paints.type) or ((Paints.groups and Paints.groups[1] and Paints.groups[1].id) or 'Classic'),
       value    = (sel.paints and sel.paints.value) or 'stock',
     },
     wheels = {
@@ -277,14 +277,30 @@ RegisterNUICallback('selectOption', function(data, cb)
 end)
 
 RegisterNUICallback('requestPaintOptions', function(data, cb)
-  local groupId = data.type or data.groupId or 'Classic'
-  local list = Paints.list[groupId] or {}
+  local groupId = tostring(data.type or data.groupId or 'Classic')
+
+  -- fallback casing (biar ga perlu klik dulu)
+  local list = Paints.list[groupId]
+  if not list then
+    list = Paints.list[groupId:lower()]
+  end
+  if not list then
+    list = Paints.list[groupId:upper()]
+  end
+  if not list then
+    -- kalau tetap ga ketemu, coba default group pertama
+    local first = (Paints.groups and Paints.groups[1] and Paints.groups[1].id) or 'Classic'
+    list = Paints.list[first] or Paints.list[tostring(first):lower()] or {}
+  end
+
   local out = { {label='Stock', value='stock'} }
   for _, c in ipairs(list) do
-    out[#out+1] = { label=c.label, value=c.id }
+    out[#out+1] = { label = c.label, value = c.id }
   end
+
   cb(out)
 end)
+
 
 RegisterNUICallback('requestWheelIndexOptions', function(_, cb)
   cb(buildWheelIndexList())
