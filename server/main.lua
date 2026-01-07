@@ -1,12 +1,11 @@
--- server/main.lua
+-- server/main.lua (FINAL)
 print('[qbx_modifpreview] server main.lua loading...')
 
 local function buildModsFromSelected(selected)
   local mods = {}
-
   selected = selected or {}
 
-  -- PAINT
+  -- PAINTS (hanya jika value bukan stock)
   if selected.paints and selected.paints.value and selected.paints.value ~= 'stock' then
     local colorId = tonumber(selected.paints.value)
     if colorId then
@@ -20,28 +19,25 @@ local function buildModsFromSelected(selected)
     end
   end
 
-  -- WHEELS (hanya kalau index dipilih)
+  -- WHEELS (hanya jika index dipilih)
   if selected.wheels and (tonumber(selected.wheels.index) or -1) ~= -1 then
     mods[#mods+1] = {
       type = 'wheels',
       label = 'Wheels',
       data = {
-        wheelType = tonumber(selected.wheels.type) or 0,
+        wheelType  = tonumber(selected.wheels.type) or 0,
         wheelIndex = tonumber(selected.wheels.index) or -1,
       },
       installed = false,
     }
   end
 
-  -- BODY (hanya kalau index dipilih)
+  -- BODY (hanya jika index dipilih)
   if selected.body and (tonumber(selected.body.index) or -1) ~= -1 then
     local part = tostring(selected.body.part or 'spoiler')
     local modType = nil
     for _, p in ipairs(ModMap.bodyParts or {}) do
-      if p.key == part then
-        modType = tonumber(p.modType)
-        break
-      end
+      if p.key == part then modType = tonumber(p.modType) break end
     end
     if modType then
       mods[#mods+1] = {
@@ -107,8 +103,8 @@ RegisterNetEvent('qbx_modifpreview:server:createOrder', function(selected, plate
   end
 
   local meta = {
-    plate = plate or '',
-    workshopId = workshopId or '',
+    plate = tostring(plate or ''),
+    workshopId = tostring(workshopId or ''),
     createdAt = os.time(),
     mods = mods,
   }

@@ -1,31 +1,17 @@
+-- client/order_menu.lua (FINAL)
 print('[qbx_modifpreview] client order_menu.lua loading...')
-
-local function fmtTime(ts)
-  -- Di client FiveM, library `os` bisa nil → jangan dipakai.
-  -- Kalau ts angka unix seconds/ms, tampilkan saja apa adanya.
-  if ts == nil then return '-' end
-  if type(ts) == 'number' then
-    -- coba deteksi ms vs seconds (kalau ms, kecilkan)
-    if ts > 2000000000 then
-      -- kemungkinan ms
-      ts = math.floor(ts / 1000)
-    end
-    return ('%d'):format(ts)
-  end
-  return tostring(ts)
-end
 
 local function buildContext(slot, meta)
   local title = 'Modif List'
   local plate = meta.plate or '-'
   local shop = meta.workshopId or '-'
-  local created = fmtTime(meta.createdAt)
+  local created = meta.createdAt and tostring(meta.createdAt) or '-'
 
   local opts = {}
 
   opts[#opts+1] = {
     title = ('Plate: %s'):format(plate),
-    description = ('Workshop: %s • Created: %s'):format(shop, created),
+    description = ('Workshop: %s • %s'):format(shop, created),
     disabled = true,
   }
 
@@ -33,15 +19,13 @@ local function buildContext(slot, meta)
 
   for i, m in ipairs(meta.mods or {}) do
     local installed = m.installed == true
-    local label = m.label or ('Mod #' .. i)
-
     opts[#opts+1] = {
-      title = installed and ('~c~%s'):format(label) or label,
+      title = installed and ('~c~%s'):format(m.label or ('Mod #'..i)) or (m.label or ('Mod #'..i)),
       description = installed and 'Sudah terpasang' or 'Klik untuk install (butuh partkit)',
       icon = installed and 'check' or 'wrench',
       disabled = installed,
       onSelect = function()
-        TriggerEvent('qbx_modifpreview:client:installOrderMod', slot, i, m)
+        TriggerEvent('qbx_modifpreview:client:installOrderMod', slot, i, m, meta)
       end
     }
   end

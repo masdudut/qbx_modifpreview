@@ -1,37 +1,63 @@
--- server/inv.lua
--- Wrapper kecil untuk kompatibilitas beberapa versi ox_inventory
+-- server/inv.lua (FINAL)
+print('[qbx_modifpreview] server inv.lua loading...')
 
-local Ox = exports.ox_inventory
+local inv = exports.ox_inventory
 
-function Inv_AddItem(src, name, count, metadata)
-  return Ox:AddItem(src, name, count or 1, metadata)
+-- pcall wrapper supaya tidak error "No such export ..."
+local function tryCall(fn, ...)
+  local ok, res = pcall(fn, ...)
+  if ok then return true, res end
+  return false, nil
 end
 
 function Inv_GetSlot(src, slot)
-  return Ox:GetSlot(src, slot)
+  if not src or not slot then return nil end
+  local ok, item = tryCall(inv.GetSlot, inv, src, slot)
+  if ok then return item end
+  -- fallback (beberapa versi pakai :GetSlot)
+  ok, item = tryCall(inv.GetSlot, src, slot)
+  if ok then return item end
+  return nil
 end
 
-function Inv_RemoveItem(src, name, count, metadata, slot)
-  return Ox:RemoveItem(src, name, count or 1, metadata, slot)
+function Inv_AddItem(src, itemName, count, metadata)
+  if not src or not itemName then return false, 'bad_args' end
+  count = tonumber(count) or 1
+
+  local ok, res = tryCall(inv.AddItem, inv, src, itemName, count, metadata)
+  if ok then
+    if res == true or res then return true end
+    return false, 'add_failed'
+  end
+
+  ok, res = tryCall(inv.AddItem, src, itemName, count, metadata)
+  if ok then
+    if res == true or res then return true end
+    return false, 'add_failed'
+  end
+
+  return false, 'add_export_missing'
 end
 
-function Inv_CountItem(src, name)
-  return Ox:GetItemCount(src, name)
-end
+-- Update metadata slot: coba beberapa export yang umum.
+function Inv_SetMetadata(src, slot, metadata)
+  if not src or not slot then return false end
 
--- Set metadata: coba beberapa export (beda versi)
-function Inv_SetSlotMetadata(src, slot, meta)
-  if Ox.SetMetadata then
-    local ok = Ox:SetMetadata(src, slot, meta)
-    if ok then return true end
+  local candidates = {
+    function() return inv:SetMetadata(src, slot, metadata) end,
+    function() return inv:SetSlotMetadata(src, slot, metadata) end,
+    function() return inv:SetItemMetadata(src, slot, metadata) end,
+    function() return inv:SetMetadata(src, slot, metadata, true) end, -- beberapa build butuh flag
+  }
+
+  for _, f in ipairs(candidates) do
+    local ok, res = pcall(f)
+    if ok and (res == true or res == nil or res) then
+      return true
+    end
   end
-  if Ox.SetSlotMetadata then
-    local ok = Ox:SetSlotMetadata(src, slot, meta)
-    if ok then return true end
-  end
-  if Ox.SetItemMetadata then
-    local ok = Ox:SetItemMetadata(src, slot, meta)
-    if ok then return true end
-  end
+
   return false
 end
+
+print('[qbx_modifpreview] server inv.lua loaded OK')

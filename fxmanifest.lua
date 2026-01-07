@@ -23,23 +23,25 @@ shared_scripts {
 
 client_scripts {
   'client/workshops.lua',
+  'client/utils_3dtext.lua', -- ⬅️ WAJIB SEBELUM
   'client/mechanic_install.lua',
   'client/order_menu.lua',
-  'client/use_modlist.lua',   -- <--- TAMBAH INI
+  'client/use_modlist.lua',      -- ✅ BARU
   'client/camera.lua',
   'client/preview.lua',
   'client/nui.lua',
   'client/command.lua',
 }
 
-
 server_scripts {
   'server/inv.lua',
-  'server/main.lua',
   'server/orders.lua',
-  'server/usable.lua',
   'server/install.lua',
+  'server/usable.lua',
+  'server/main.lua',
 }
+
+
 
 dependencies {
   'ox_lib',

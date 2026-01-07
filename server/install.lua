@@ -1,29 +1,15 @@
--- server/install.lua
--- partkit consumption (1 partkit per 1 install)
+-- server/install.lua (FINAL)
+print('[qbx_modifpreview] server install.lua loading...')
 
-local function getPlayer(src)
-  return exports.qbx_core:GetPlayer(src)
-end
+-- Broadcast 3D text to all clients.
+-- Clients will only render it if they are within "radius" from coords.
+RegisterNetEvent('qbx_modifpreview:server:broadcast3DText', function(coords, text, durationMs, radius)
+  if type(coords) ~= 'table' or coords.x == nil or coords.y == nil or coords.z == nil then return end
+  text = tostring(text or '')
+  durationMs = tonumber(durationMs) or 6000
+  radius = tonumber(radius) or 18.0
 
-local function isMechanic(src)
-  local player = getPlayer(src)
-  if not player then return false end
-  local job = player.PlayerData and player.PlayerData.job
-  local jobName = job and job.name
-  if not jobName then return false end
-  if Config.AllowedMechanicJobs then
-    return Config.AllowedMechanicJobs[jobName] == true
-  end
-  return jobName == 'mechanic'
-end
-
-lib.callback.register('qbx_modifpreview:server:consumepartkit', function(src)
-  if not isMechanic(src) then return false end
-
-  local kit = Config.partkitItemName or 'partkit'
-  local count = Inv_CountItem(src, kit)
-  if (count or 0) < 1 then return false end
-
-  local removed = Inv_RemoveItem(src, kit, 1)
-  return removed == true
+  TriggerClientEvent('qbx_modifpreview:client:show3DText', -1, coords, text, durationMs, radius)
 end)
+
+print('[qbx_modifpreview] server install.lua loaded OK')

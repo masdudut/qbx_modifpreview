@@ -1,46 +1,50 @@
-print('[qbx_modifpreview] client camera.lua loaded (FINAL - orbit backspace fix)')
+-- client/camera.lua
+-- Camera handling for qbx_modifpreview:
+-- - When NUI is focused: block gameplay camera look (mouse won't move gameplay camera)
+-- - When user clicks the camera button: enter ORBIT mode around the vehicle the player is currently in
+--   * Starts from current gameplay camera position (no teleport)
+--   * Hold LMB + drag to orbit (yaw/pitch)
+--   * Mouse wheel to zoom
+--   * Smooth + inertia
+--   * Raycast collision to prevent clipping into walls/objects
+-- - Backspace exits orbit and returns focus to NUI
 
-local Cam = {
-  active = false,
-  orbit = false,
-  cam = nil,
-  veh = nil,
-  target = vec3(0,0,0),
+local menuOpen = false
+local orbitActive = false
 
-  yaw = 0.0,
-  pitch = 0.0,
-  dist = 3.2,
+local cam = nil
+local orbitVeh = 0
 
-  minPitch = -25.0,
-  maxPitch =  25.0,
-  minDist  =  2.0,
-  maxDist  =  6.0,
+-- Orbit parameters (degrees/meters)
+local heading = 0.0
+local pitch = 15.0
+local radius = 4.0
 
-  lastUpdate = 0,
-}
+-- Inertia (deg/frame-ish, scaled)
+local velHeading = 0.0
+local velPitch = 0.0
 
--- =========================
--- CONFIG (ubah jika perlu)
--- =========================
-local PAD = 0
+-- Tuning
+local PITCH_MIN = -35.0
+local PITCH_MAX = 75.0
+local RADIUS_MIN = 1.8
+local RADIUS_MAX = 12.0
 
--- Back / Cancel (umumnya BACKSPACE)
-local CONTROL_BACKSPACE = 177
+local DRAG_SENS_YAW = -260.0
+local DRAG_SENS_PITCH = -180.0
 
--- Nama event/action UI (kalau di script kamu beda, ubah di sini)
-local UI_EVENT_OPEN_MENU = 'qbx_modifpreview:client:openMenu'
-local UI_NUI_ACTION_OPEN_MENU = 'openMenu'
+local INERTIA_DECAY = 0.88      -- closer to 1 = longer glide
+local INPUT_SMOOTH = 0.35       -- 0..1 how quickly velocity follows mouse while dragging
+local COLLISION_PUSH = 0.22
 
--- =========================
+-- Mouse wheel (zoom)
+local ZOOM_STEP = 0.6
+local ZOOM_SMOOTH = 0.35
+local targetRadius = nil
 
-local function deg2rad(d) return d * 0.017453292519943295 end
-
-local function getVehCenter(veh)
-  local c = GetEntityCoords(veh)
-  local minDim, maxDim = GetModelDimensions(GetEntityModel(veh))
-  local z = c.z + (maxDim.z * 0.55)
-  return vec3(c.x, c.y, z)
-end
+-- Focus point height clamp (vehicle body center-ish)
+local FOCUS_UP_MIN = 0.6
+local FOCUS_UP_MAX = 1.35
 
 local function clamp(v, a, b)
   if v < a then return a end
@@ -48,168 +52,250 @@ local function clamp(v, a, b)
   return v
 end
 
-local function raycastCam(target, desired)
-  local hit = 0
-  local endCoords = desired
-  local surfaceNormal = vec3(0,0,1)
-
-  local ray = StartShapeTestRay(
-    target.x, target.y, target.z,
-    desired.x, desired.y, desired.z,
-    -1, Cam.veh or 0, 7
-  )
-  local _, h, eC, nrm, _ent = GetShapeTestResult(ray)
-  hit = h
-  if hit == 1 then
-    endCoords = vec3(eC.x, eC.y, eC.z)
-    surfaceNormal = vec3(nrm.x, nrm.y, nrm.z)
-    -- dorong sedikit keluar biar nggak nempel
-    endCoords = endCoords + surfaceNormal * 0.25
-  end
-  return endCoords
+local function setNuiFocus(state)
+  SetNuiFocus(state, state)
+  SetNuiFocusKeepInput(false)
 end
 
-local function groundClamp(pos)
-  local ok, gz = GetGroundZFor_3dCoord(pos.x, pos.y, pos.z + 5.0, 0)
-  if ok then
-    local minZ = gz + 0.35
-    if pos.z < minZ then
-      return vec3(pos.x, pos.y, minZ)
-    end
+local function destroyCam()
+  if cam then
+    RenderScriptCams(false, true, 200, true, true)
+    DestroyCam(cam, false)
+    cam = nil
   end
-  return pos
 end
 
-local function computeCamPos()
-  local t = Cam.target
-  local yawR = deg2rad(Cam.yaw)
-  local pitchR = deg2rad(Cam.pitch)
+local function getCurrentVehicle()
+  local ped = PlayerPedId()
+  local v = GetVehiclePedIsIn(ped, false)
+  if v ~= 0 and DoesEntityExist(v) then return v end
+  return 0
+end
 
-  local x = t.x + (math.cos(yawR) * math.cos(pitchR)) * Cam.dist
-  local y = t.y + (math.sin(yawR) * math.cos(pitchR)) * Cam.dist
-  local z = t.z + (math.sin(pitchR)) * Cam.dist
+local function getVehicleFocus(veh)
+  local c = GetEntityCoords(veh)
 
-  local desired = vec3(x,y,z)
-  desired = raycastCam(t, desired)
-  desired = groundClamp(desired)
+  local focusZ = 0.9
+  local ok, minDim, maxDim = pcall(function()
+    return GetModelDimensions(GetEntityModel(veh))
+  end)
+  if ok and minDim and maxDim then
+    focusZ = (maxDim.z - minDim.z) * 0.45
+    focusZ = clamp(focusZ, FOCUS_UP_MIN, FOCUS_UP_MAX)
+  end
+
+  return vector3(c.x, c.y, c.z + focusZ)
+end
+
+local function initFromGameplayCam(focus)
+  -- Use current gameplay cam so we don't "jump" anywhere.
+  local gc = GetGameplayCamCoord()
+
+  local dx = gc.x - focus.x
+  local dy = gc.y - focus.y
+  local dz = gc.z - focus.z
+
+  local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+  if dist < 0.2 then
+    dist = 4.0
+    dx, dy, dz = 0.0, dist, 0.0
+  end
+
+  radius = clamp(dist, RADIUS_MIN, RADIUS_MAX)
+  targetRadius = radius
+
+  -- Heading: from focus to camera in XY plane
+  heading = (math.deg(math.atan2(dx, dy)) + 360.0) % 360.0
+
+  -- Pitch: elevation
+  pitch = math.deg(math.asin(clamp(dz / radius, -0.999, 0.999)))
+  pitch = clamp(pitch, PITCH_MIN, PITCH_MAX)
+
+  velHeading = 0.0
+  velPitch = 0.0
+end
+
+local function computeDesiredCam(focus)
+  local h = math.rad(heading)
+  local p = math.rad(pitch)
+
+  local planar = radius * math.cos(p)
+  local offX = planar * math.sin(h)
+  local offY = planar * math.cos(h)
+  local offZ = radius * math.sin(p)
+
+  return vector3(focus.x + offX, focus.y + offY, focus.z + offZ)
+end
+
+local function applyCollision(focus, desired, ignoreEnt)
+  -- Raycast from focus to desired camera point, pull camera closer if something blocks.
+  -- Using correct FiveM return signature for GetShapeTestResult.
+  local flags = -1 -- everything
+  local ray = StartShapeTestRay(focus.x, focus.y, focus.z, desired.x, desired.y, desired.z, flags, ignoreEnt or 0, 7)
+  local _, hit, endCoords, surfaceNormal, _entityHit = GetShapeTestResult(ray)
+
+  if hit == 1 and endCoords and surfaceNormal then
+    local nx = surfaceNormal.x or 0.0
+    local ny = surfaceNormal.y or 0.0
+    local nz = surfaceNormal.z or 0.0
+    return vector3(
+      endCoords.x + nx * COLLISION_PUSH,
+      endCoords.y + ny * COLLISION_PUSH,
+      endCoords.z + nz * COLLISION_PUSH
+    )
+  end
 
   return desired
 end
 
-local function applyCam()
-  if not Cam.active or not DoesEntityExist(Cam.veh) then return end
-  Cam.target = getVehCenter(Cam.veh)
+local function enterOrbit()
+  if orbitActive then return end
 
-  local pos = computeCamPos()
-  SetCamCoord(Cam.cam, pos.x, pos.y, pos.z)
-  PointCamAtCoord(Cam.cam, Cam.target.x, Cam.target.y, Cam.target.z)
-end
-
--- keluar orbit: kamera tetap aktif & posisi terakhir tetap nahan
-local function ExitOrbitToMenu()
-  if not Cam.active then return end
-
-  -- STOP orbit saja, JANGAN destroy cam, JANGAN RenderScriptCams(false)
-  Cam.orbit = false
-
-  -- Buka kembali menu UI (aman kalau tidak ada listener)
-  SetNuiFocus(true, true)
-  SendNUIMessage({ action = UI_NUI_ACTION_OPEN_MENU })
-  TriggerEvent(UI_EVENT_OPEN_MENU)
-end
-
-function Camera_StartMenu(veh)
-  if not veh or not DoesEntityExist(veh) then return end
-
-  Cam.veh = veh
-  Cam.target = getVehCenter(veh)
-
-  -- start yaw dari heading kendaraan biar “jelas arah”
-  -- NOTE: ini akan reset kalau StartMenu dipanggil lagi.
-  -- Agar kamera "nahan posisi terakhir" saat balik menu dari orbit,
-  -- pastikan flow UI kamu TIDAK memanggil Camera_StartMenu ulang ketika ExitOrbitToMenu().
-  Cam.yaw = GetEntityHeading(veh) + 180.0
-  Cam.pitch = 8.0
-  Cam.dist = 3.2
-
-  if Cam.cam and DoesCamExist(Cam.cam) then
-    DestroyCam(Cam.cam, false)
+  orbitVeh = getCurrentVehicle()
+  if orbitVeh == 0 then
+    -- Must be in a vehicle; keep menu as-is.
+    return
   end
 
-  Cam.cam = CreateCam("DEFAULT_SCRIPTED_CAMERA", true)
-  Cam.active = true
-  Cam.orbit = false
+  local focus = getVehicleFocus(orbitVeh)
 
-  applyCam()
-  RenderScriptCams(true, true, 250, true, true)
+  -- IMPORTANT: init BEFORE removing NUI focus, so we capture the "correct" gameplay cam.
+  initFromGameplayCam(focus)
+  local gc = GetGameplayCamCoord()
+  local gr = GetGameplayCamRot(2)
+  local gfov = GetGameplayCamFov()
 
-  -- saat menu kebuka, camera lock (tidak orbit sampai klik tombol)
-  -- fokus NUI tetap dipegang oleh nui.lua
+  -- Now allow mouse control (no NUI focus)
+  setNuiFocus(false)
+
+  cam = CreateCam("DEFAULT_SCRIPTED_CAMERA", true)
+  SetCamCoord(cam, gc.x, gc.y, gc.z)
+  SetCamRot(cam, gr.x, 0.0, gr.z, 2)
+  SetCamFov(cam, gfov)
+
+  RenderScriptCams(true, true, 200, true, true)
+  orbitActive = true
 end
 
-function Camera_Stop()
-  Cam.orbit = false
-  Cam.active = false
+local function exitOrbit()
+  if not orbitActive then return end
+  orbitActive = false
+  orbitVeh = 0
+  targetRadius = nil
+  destroyCam()
 
-  if Cam.cam and DoesCamExist(Cam.cam) then
-    RenderScriptCams(false, true, 250, true, true)
-    DestroyCam(Cam.cam, false)
+  if menuOpen then
+    setNuiFocus(true)
+  else
+    setNuiFocus(false)
   end
-
-  Cam.cam = nil
-  Cam.veh = nil
 end
 
-function Camera_ToggleOrbit()
-  if not Cam.active then return end
-  Cam.orbit = not Cam.orbit
+-- NUI button -> enter orbit (do not toggle off by clicking again; exit only via Backspace)
+RegisterNetEvent('qbx_modifpreview:client:cameraToggle', function()
+  if orbitActive then return end
+  enterOrbit()
+end)
 
-  -- kalau masuk orbit, biasanya UI ditutup & fokus dimatiin oleh nui.lua
-  -- tapi kalau ternyata tidak, kamu bisa pakai ini:
-  -- if Cam.orbit then SetNuiFocus(false, false) end
-end
+RegisterNetEvent('qbx_modifpreview:client:cameraBack', function()
+  exitOrbit()
+end)
 
--- orbit loop
+RegisterNetEvent('qbx_modifpreview:client:menuState', function(state)
+  menuOpen = state and true or false
+  if menuOpen then
+    setNuiFocus(true)
+  else
+    setNuiFocus(false)
+    exitOrbit()
+  end
+end)
+
 CreateThread(function()
   while true do
-    if not Cam.active or not Cam.orbit then
-      Wait(150)
-    else
-      Wait(0)
+    local nuiFocused = IsNuiFocused()
 
-      -- Disable control yang mengganggu orbit
-      DisableControlAction(PAD, 1, true)   -- look left/right
-      DisableControlAction(PAD, 2, true)   -- look up/down
-      DisableControlAction(PAD, 24, true)  -- attack
-      DisableControlAction(PAD, 25, true)  -- aim
-      DisableControlAction(PAD, 106, true) -- vehicle mouse control
+    -- Lock gameplay look whenever NUI is focused or orbit is active
+    if nuiFocused or orbitActive then
+      DisableControlAction(0, 1, true)  -- LookLeftRight
+      DisableControlAction(0, 2, true)  -- LookUpDown
 
-      -- PENTING: Backspace harus tetap kebaca meskipun beberapa control di-disable.
-      -- Kadang tombol jadi "disabled", jadi cek dua-duanya biar aman.
-      EnableControlAction(PAD, CONTROL_BACKSPACE, true)
+      -- Block attack etc while in UI/cam mode
+      DisableControlAction(0, 24, true)
+      DisableControlAction(0, 25, true)
+      DisableControlAction(0, 37, true)
+      DisableControlAction(0, 44, true)
+      DisableControlAction(0, 140, true)
+      DisableControlAction(0, 141, true)
+      DisableControlAction(0, 142, true)
 
-      if IsControlJustPressed(PAD, CONTROL_BACKSPACE) or IsDisabledControlJustPressed(PAD, CONTROL_BACKSPACE) then
-        ExitOrbitToMenu()
-        goto continue
+      if orbitActive and cam then
+        -- Ensure we still have a vehicle (pivot = current vehicle)
+        local v = getCurrentVehicle()
+        if v == 0 then
+          exitOrbit()
+          Wait(0)
+          goto continue
+        end
+        orbitVeh = v
+
+        local focus = getVehicleFocus(orbitVeh)
+
+        -- Zoom with wheel
+        if IsDisabledControlJustPressed(0, 241) then -- wheel up
+          targetRadius = clamp((targetRadius or radius) - ZOOM_STEP, RADIUS_MIN, RADIUS_MAX)
+        elseif IsDisabledControlJustPressed(0, 242) then -- wheel down
+          targetRadius = clamp((targetRadius or radius) + ZOOM_STEP, RADIUS_MIN, RADIUS_MAX)
+        end
+        if targetRadius then
+          radius = radius + (targetRadius - radius) * ZOOM_SMOOTH
+        end
+
+        -- Drag to orbit (LMB hold)
+        local dragging = IsDisabledControlPressed(0, 24) -- LMB (attack)
+        if dragging then
+          local dx = GetDisabledControlNormal(0, 1)
+          local dy = GetDisabledControlNormal(0, 2)
+          if dy == 0.0 then
+            dy = GetControlNormal(0, 2)
+          end
+
+          local inputH = dx * DRAG_SENS_YAW
+          local inputP = (-dy) * math.abs(DRAG_SENS_PITCH)  -- drag up = look up
+
+          -- Smoothly move velocities toward input (gives "premium" feel)
+          velHeading = velHeading + (inputH - velHeading) * INPUT_SMOOTH
+          velPitch   = velPitch   + (inputP - velPitch)   * INPUT_SMOOTH
+        else
+          -- Inertia decay when not dragging
+          velHeading = velHeading * INERTIA_DECAY
+          velPitch   = velPitch   * INERTIA_DECAY
+
+          if math.abs(velHeading) < 0.001 then velHeading = 0.0 end
+          if math.abs(velPitch) < 0.001 then velPitch = 0.0 end
+        end
+
+        heading = (heading + velHeading) % 360.0
+        pitch = clamp(pitch + velPitch, PITCH_MIN, PITCH_MAX)
+
+        local desired = computeDesiredCam(focus)
+        desired = applyCollision(focus, desired, orbitVeh)
+
+        SetCamCoord(cam, desired.x, desired.y, desired.z)
+        PointCamAtCoord(cam, focus.x, focus.y, focus.z)
+
+        -- Exit with Backspace
+        if IsControlJustPressed(0, 177) then
+          exitOrbit()
+        end
       end
-
-      local dx = GetDisabledControlNormal(PAD, 1)
-      local dy = GetDisabledControlNormal(PAD, 2)
-
-      -- sens
-      Cam.yaw = Cam.yaw + (dx * 140.0)
-      Cam.pitch = clamp(Cam.pitch + (-dy * 90.0), Cam.minPitch, Cam.maxPitch)
-
-      -- zoom
-      if IsDisabledControlPressed(PAD, 16) then -- mouse wheel up
-        Cam.dist = clamp(Cam.dist - 0.08, Cam.minDist, Cam.maxDist)
-      elseif IsDisabledControlPressed(PAD, 17) then -- mouse wheel down
-        Cam.dist = clamp(Cam.dist + 0.08, Cam.minDist, Cam.maxDist)
-      end
-
-      applyCam()
 
       ::continue::
+      Wait(0)
+    else
+      Wait(250)
     end
   end
 end)
+
+print('[qbx_modifpreview] camera.lua (orbit+zoom+smoothing+collision) loaded')

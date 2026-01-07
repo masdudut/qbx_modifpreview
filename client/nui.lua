@@ -1,4 +1,5 @@
-print('[qbx_modifpreview] client nui.lua loaded (FINAL camera-safe)')
+-- client/nui.lua (FINAL)
+print('[qbx_modifpreview] client nui.lua loading...')
 
 local nuiOpen = false
 
@@ -23,12 +24,12 @@ end
 
 local function buildBodyIndexList(modType)
   local veh = Preview_GetVehicle()
-  if not veh then return { {label='Stock', value=-1} } end
+  if not veh then return { { label = 'Stock', value = -1 } } end
   SetVehicleModKit(veh, 0)
 
   local max = GetNumVehicleMods(veh, modType) or 0
-  local out = { {label='Stock', value=-1} }
-  for i=0, max-1 do
+  local out = { { label = 'Stock', value = -1 } }
+  for i = 0, max - 1 do
     out[#out+1] = { label = getModName(veh, modType, i), value = i }
   end
   return out
@@ -36,12 +37,12 @@ end
 
 local function buildWheelIndexList()
   local veh = Preview_GetVehicle()
-  if not veh then return { {label='Stock', value=-1} } end
+  if not veh then return { { label = 'Stock', value = -1 } } end
   SetVehicleModKit(veh, 0)
 
   local max = GetNumVehicleMods(veh, 23) or 0
-  local out = { {label='Stock', value=-1} }
-  for i=0, max-1 do
+  local out = { { label = 'Stock', value = -1 } }
+  for i = 0, max - 1 do
     out[#out+1] = { label = getModName(veh, 23, i), value = i }
   end
   return out
@@ -51,25 +52,27 @@ local function openNui()
   if nuiOpen then return end
   nuiOpen = true
 
-  -- NUI fokus ON (cursor muncul)
+  -- ✅ kasih tau camera: menu sedang terbuka (lock game camera)
+  TriggerEvent('qbx_modifpreview:client:menuState', true)
+
   setFocus(true)
 
   local sel = Preview_GetSelected() or {}
 
   local tabs = {
-    { id='paints', label='Paints' },
-    { id='wheels', label='Wheels' },
-    { id='body',   label='Body (More)' },
-    { id='xenon',  label='Xenon' },
-    { id='tint',   label='Tint' },
-    { id='plate',  label='Plate' },
-    { id='horn',   label='Horn' },
+    { id = 'paints', label = 'Paints' },
+    { id = 'wheels', label = 'Wheels' },
+    { id = 'body',   label = 'BodyKit' },
+    { id = 'xenon',  label = 'Xenon' },
+    { id = 'tint',   label = 'Tint' },
+    { id = 'plate',  label = 'Plate' },
+    { id = 'horn',   label = 'Horn' },
   }
 
   local selected = {
     paints = {
       category = (sel.paints and sel.paints.category) or 'primary',
-      type = (sel.paints and sel.paints.type) or ((Paints.groups and Paints.groups[1] and Paints.groups[1].id) or 'Classic'),
+      type     = (sel.paints and sel.paints.type) or 'Classic',
       value    = (sel.paints and sel.paints.value) or 'stock',
     },
     wheels = {
@@ -92,12 +95,12 @@ local function openNui()
       showH2 = true,
       h1Label = 'Paint Category',
       h1Items = {
-        { label='Primary Color',   value='primary' },
-        { label='Secondary Color', value='secondary' },
-        { label='Pearl Color',     value='pearl' },
-        { label='Wheel Color',     value='wheel' },
-        { label='Interior Color',  value='interior' },
-        { label='Dashboard Color', value='dashboard' },
+        { label = 'Primary Color',   value = 'primary' },
+        { label = 'Secondary Color', value = 'secondary' },
+        { label = 'Pearl Color',     value = 'pearl' },
+        { label = 'Wheel Color',     value = 'wheel' },
+        { label = 'Interior Color',  value = 'interior' },
+        { label = 'Dashboard Color', value = 'dashboard' },
       },
       h2Label = 'Paint Type',
       h2Items = (function()
@@ -111,7 +114,7 @@ local function openNui()
 
     wheels = {
       show = true,
-      showH2 = false, -- IMPORTANT: H2 OFF
+      showH2 = false,
       h1Label = 'Wheel Type',
       h1Items = (function()
         local arr = {}
@@ -124,7 +127,7 @@ local function openNui()
 
     body = {
       show = true,
-      showH2 = false, -- IMPORTANT: H2 OFF
+      showH2 = false,
       h1Label = 'Body Part',
       h1Items = (function()
         local arr = {}
@@ -135,35 +138,38 @@ local function openNui()
       end)(),
     },
 
-    xenon = { show=false },
-    tint  = { show=false },
-    plate = { show=false },
-    horn  = { show=false },
+    xenon = { show = false },
+    tint  = { show = false },
+    plate = { show = false },
+    horn  = { show = false },
   }
 
   local optionsByTab = {
-    paints = { {label='Stock', value='stock'} }, -- dynamic by requestPaintOptions
+    paints = { { label = 'Stock', value = 'stock' } },
     wheels = buildWheelIndexList(),
-    body   = { {label='Stock', value=-1} },      -- dynamic by requestBodyOptions
+    body   = { { label = 'Stock', value = -1 } },
 
-    xenon  = (function()
+    xenon = (function()
       local arr = {}
-      for _, x in ipairs(ModMap.xenon or {}) do arr[#arr+1] = { label=x.label, value=x.id } end
+      for _, x in ipairs(ModMap.xenon or {}) do arr[#arr+1] = { label = x.label, value = x.id } end
       return arr
     end)(),
+
     tint = (function()
       local arr = {}
-      for _, t in ipairs(ModMap.windowTints or {}) do arr[#arr+1] = { label=t.label, value=t.id } end
+      for _, t in ipairs(ModMap.windowTints or {}) do arr[#arr+1] = { label = t.label, value = t.id } end
       return arr
     end)(),
+
     plate = (function()
       local arr = {}
-      for _, p in ipairs(ModMap.plateIndexes or {}) do arr[#arr+1] = { label=p.label, value=p.id } end
+      for _, p in ipairs(ModMap.plateIndexes or {}) do arr[#arr+1] = { label = p.label, value = p.id } end
       return arr
     end)(),
+
     horn = (function()
       local arr = {}
-      for _, h in ipairs(ModMap.horns or {}) do arr[#arr+1] = { label=h.label, value=h.id } end
+      for _, h in ipairs(ModMap.horns or {}) do arr[#arr+1] = { label = h.label, value = h.id } end
       return arr
     end)(),
   }
@@ -182,21 +188,26 @@ local function closeNui()
   if not nuiOpen then return end
   nuiOpen = false
 
-  -- selalu reset focus supaya cursor tidak nyangkut
   setFocus(false)
 
-  SendNUIMessage({ action='close' })
+  -- ✅ kasih tau camera: menu ditutup
+  TriggerEvent('qbx_modifpreview:client:menuState', false)
+
+  SendNUIMessage({ action = 'close' })
 end
 
 RegisterNetEvent('qbx_modifpreview:nui:open', openNui)
 RegisterNetEvent('qbx_modifpreview:nui:close', closeNui)
+
+RegisterNetEvent('qbx_modifpreview:nui:setFocus', function(on)
+  setFocus(on == true)
+end)
 
 AddEventHandler('onClientResourceStop', function(res)
   if res ~= GetCurrentResourceName() then return end
   setFocus(false)
 end)
 
--- ===== callbacks =====
 RegisterNUICallback('cancel', function(_, cb)
   TriggerEvent('qbx_modifpreview:client:cancel')
   cb(true)
@@ -208,38 +219,21 @@ RegisterNUICallback('confirm', function(_, cb)
 end)
 
 RegisterNUICallback('camera', function(_, cb)
-  -- tombol camera: masuk/keluar orbit mode
-  if Camera_ToggleOrbit then
-    Camera_ToggleOrbit()
-  end
-
-  -- saat orbit ON => lepaskan cursor supaya mouse gerak kamera
-  -- saat orbit OFF => balikkan cursor ke menu
-  if Camera_IsOrbit and Camera_IsOrbit() then
-    setFocus(false)
-  else
-    setFocus(true)
-  end
-
+  -- toggle orbit
+  TriggerEvent('qbx_modifpreview:client:cameraToggle')
   cb(true)
 end)
 
--- kalau kamu mau BACKSPACE balik dari orbit (optional)
 RegisterNUICallback('camera_back', function(_, cb)
-  if Camera_ToggleOrbit then
-    -- paksa off kalau sedang orbit
-    if Camera_IsOrbit and Camera_IsOrbit() then
-      Camera_ToggleOrbit()
-    end
-  end
-  setFocus(true)
+  -- exit orbit (BACKSPACE from NUI)
+  TriggerEvent('qbx_modifpreview:client:cameraBack')
   cb(true)
 end)
 
 RegisterNUICallback('setHeader', function(data, cb)
-  local tab = data.tab
-  local which = data.which
-  local value = data.value
+  local tab = data and data.tab
+  local which = data and data.which
+  local value = data and data.value
 
   if tab == 'paints' then
     if which == 'h1' then TriggerEvent('qbx_modifpreview:client:set', 'paint_category', value) end
@@ -254,8 +248,8 @@ RegisterNUICallback('setHeader', function(data, cb)
 end)
 
 RegisterNUICallback('selectOption', function(data, cb)
-  local tab = data.tab
-  local value = data.value
+  local tab = data and data.tab
+  local value = data and data.value
 
   if tab == 'paints' then
     TriggerEvent('qbx_modifpreview:client:set', 'paint_color', value)
@@ -277,42 +271,28 @@ RegisterNUICallback('selectOption', function(data, cb)
 end)
 
 RegisterNUICallback('requestPaintOptions', function(data, cb)
-  local groupId = tostring(data.type or data.groupId or 'Classic')
-
-  -- fallback casing (biar ga perlu klik dulu)
-  local list = Paints.list[groupId]
-  if not list then
-    list = Paints.list[groupId:lower()]
-  end
-  if not list then
-    list = Paints.list[groupId:upper()]
-  end
-  if not list then
-    -- kalau tetap ga ketemu, coba default group pertama
-    local first = (Paints.groups and Paints.groups[1] and Paints.groups[1].id) or 'Classic'
-    list = Paints.list[first] or Paints.list[tostring(first):lower()] or {}
-  end
-
-  local out = { {label='Stock', value='stock'} }
+  local groupId = (data and (data.type or data.groupId)) or 'Classic'
+  local list = Paints.list[groupId] or {}
+  local out = { { label = 'Stock', value = 'stock' } }
   for _, c in ipairs(list) do
     out[#out+1] = { label = c.label, value = c.id }
   end
-
   cb(out)
 end)
-
 
 RegisterNUICallback('requestWheelIndexOptions', function(_, cb)
   cb(buildWheelIndexList())
 end)
 
 RegisterNUICallback('requestBodyOptions', function(data, cb)
-  local partKey = data.partKey
+  local partKey = data and data.partKey
   for _, p in ipairs(ModMap.bodyParts or {}) do
     if p.key == partKey then
       cb(buildBodyIndexList(p.modType))
       return
     end
   end
-  cb({{label='Stock', value=-1}})
+  cb({ { label = 'Stock', value = -1 } })
 end)
+
+print('[qbx_modifpreview] client nui.lua loaded OK')

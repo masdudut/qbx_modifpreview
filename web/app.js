@@ -33,10 +33,56 @@ const root = document.getElementById('root');
 const subtitle = document.getElementById('subtitle');
 
 const btnCam = document.getElementById('btnCam');
+// NOTE: camera button handler is registered once in the "UI events" section below.
+// Keeping a single handler prevents double-toggle (enter+exit in the same click).
 const btnConfirm = document.getElementById('btnConfirm');
 const btnClose = document.getElementById('btnClose');
 
 const tabsEl = document.getElementById('tabs');
+
+// tabs horizontal scroll helper (wheel + drag)
+(() => {
+  if (!tabsEl) return;
+
+  // Convert vertical wheel to horizontal scroll while hovering tabs
+  tabsEl.addEventListener('wheel', (e) => {
+    // If user already scrolls horizontally (trackpad), keep default
+    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+
+    tabsEl.scrollLeft += e.deltaY;
+    e.preventDefault();
+  }, { passive: false });
+
+  // Click + drag to scroll
+  let isDown = false;
+  let startX = 0;
+  let startScroll = 0;
+  let moved = false;
+
+  tabsEl.addEventListener('mousedown', (e) => {
+    isDown = true;
+    moved = false;
+    startX = e.pageX;
+    startScroll = tabsEl.scrollLeft;
+  });
+
+  window.addEventListener('mouseup', () => { isDown = false; });
+  window.addEventListener('mousemove', (e) => {
+    if (!isDown) return;
+    const dx = (e.pageX - startX);
+    if (Math.abs(dx) > 3) moved = true;
+    tabsEl.scrollLeft = startScroll - dx;
+  });
+
+  // Prevent accidental text selection while dragging
+  tabsEl.addEventListener('click', (e) => {
+    if (moved) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
+})();
+
 
 const headersEl = document.getElementById('headers');
 const h1Row = document.getElementById('h1Row');
